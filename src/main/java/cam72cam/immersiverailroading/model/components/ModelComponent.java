@@ -35,6 +35,7 @@ public class ModelComponent {
         public final boolean interior;
         public final boolean fullbright;
         public final boolean transparent;
+        public final boolean glass;
 
         public ModelGroupData(String modelID) {
             Matcher m = lcgPattern.matcher(modelID);
@@ -44,6 +45,7 @@ public class ModelComponent {
             boolean interior = false;
             boolean fullbright = false;
             boolean transparent = false;
+            boolean glass = false;
 
             for (String x : modelID.split("_")) {
                 switch (x) {
@@ -54,10 +56,15 @@ public class ModelComponent {
                         interior = true;
                         break;
                     case "FULLBRIGHT":
+                    case "GLOW":
                         fullbright = true;
                         break;
                     case "ALPHA":
                         transparent = true;
+                        break;
+                    case "GLASS":
+                        transparent = true;
+                        glass = true;
                         break;
                 }
             }
@@ -67,6 +74,7 @@ public class ModelComponent {
             this.interior = interior;
             this.fullbright = fullbright;
             this.transparent = transparent;
+            this.glass = glass;
         }
     }
 

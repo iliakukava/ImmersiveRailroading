@@ -7,6 +7,7 @@ import cam72cam.immersiverailroading.util.DataBlock;
 import cam72cam.mod.model.common.mesh.Model;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -26,8 +27,14 @@ public class ComponentProvider {
         this.internal_model_scale = internal_model_scale;
     }
 
+    private static final Map<String, Pattern> COMPILED = new ConcurrentHashMap<>();
+
+    private static Pattern compiledPattern(String regex) {
+        return COMPILED.computeIfAbsent(regex, Pattern::compile);
+    }
+
     private Set<String> modelIDs(String pattern) {
-        Pattern regex = Pattern.compile(pattern);
+        Pattern regex = compiledPattern(pattern);
         Set<String> modelIDs = groups.stream().filter(group -> regex.matcher(group).matches()).collect(Collectors.toSet());
         groups.removeAll(modelIDs);
 
@@ -35,7 +42,7 @@ public class ComponentProvider {
     }
 
     private Map<String, Set<String>> modelIDMap(String pattern) {
-        Pattern rgx = Pattern.compile(pattern);
+        Pattern rgx = compiledPattern(pattern);
         Map<String, Set<String>> modelIDs = groups.stream()
                 .map(rgx::matcher)
                 .filter(Matcher::matches)

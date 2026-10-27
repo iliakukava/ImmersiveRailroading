@@ -1,6 +1,7 @@
 package cam72cam.immersiverailroading.model;
 
 import cam72cam.immersiverailroading.ConfigGraphics;
+import cam72cam.immersiverailroading.ImmersiveRailroading;
 import cam72cam.immersiverailroading.ConfigSound;
 import cam72cam.immersiverailroading.entity.CarPassenger;
 import cam72cam.immersiverailroading.entity.EntityMoveableRollingStock;
@@ -15,10 +16,16 @@ import cam72cam.immersiverailroading.model.part.*;
 import cam72cam.immersiverailroading.model.part.TrackFollower.TrackFollowers;
 import cam72cam.immersiverailroading.registry.EntityRollingStockDefinition;
 import cam72cam.immersiverailroading.registry.EntityRollingStockDefinition.SoundDefinition;
+import cam72cam.immersiverailroading.render.GifClip;
+import cam72cam.immersiverailroading.render.GifUv;
+import cam72cam.immersiverailroading.script.ModelScript;
+import cam72cam.immersiverailroading.script.lua.LuaException;
 import cam72cam.immersiverailroading.sound.StockSound;
 import cam72cam.mod.MinecraftClient;
 import cam72cam.mod.model.common.ModelLoader;
 import cam72cam.mod.model.common.mesh.Model;
+import cam72cam.mod.render.opengl.Texture;
+import cam72cam.mod.resource.Identifier;
 import cam72cam.mod.render.OptiFine;
 import cam72cam.mod.render.common.ModelConfig;
 import cam72cam.mod.render.common.ModelRenderer;
@@ -26,8 +33,10 @@ import cam72cam.mod.render.opengl.RenderState;
 import util.Matrix4;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class StockModel<ENTITY extends EntityMoveableRollingStock, DEFINITION extends EntityRollingStockDefinition> {
@@ -70,15 +79,22 @@ public class StockModel<ENTITY extends EntityMoveableRollingStock, DEFINITION ex
     private final SwaySimulator sway;
 
     private List<StockSound> customSounds = new ArrayList<>();
+    private final ModelScript script;
+    private final Map<UUID, int[]> lodCache = new HashMap<>();
 
     public StockModel(DEFINITION def) throws Exception {
         this.model = ModelLoader.load(def.modelLoc, def.internal_model_scale, def.textureNames.keySet(), ConfigGraphics.textureCacheSeconds,
-                                      maxSize -> {
-                                          List<Integer> lodSizes = new ArrayList<>();
-                                          lodSizes.add(LOD_LARGE);
-                                          lodSizes.add(LOD_SMALL);
-                                          return lodSizes;
-                                      });
+                                      TextureMemory::lodSizes);
+        TextureMemory.retain(this.model);
+        if (def.scriptSource != null) {
+            try {
+                this.script = ModelScript.compile(def.scriptName, def.scriptSource);
+            } catch (LuaException ex) {
+                throw new IllegalArgumentException(ex.format(def.scriptName), ex);
+            }
+        } else {
+            this.script = null;
+        }
 
         this.def = def;
         boolean hasInterior = model.groups().stream().anyMatch(x -> x.contains("INTERIOR"));
@@ -132,9 +148,36 @@ public class StockModel<ENTITY extends EntityMoveableRollingStock, DEFINITION ex
                     }
                 }
             }
+            if (script != null) {
+                Matrix4 pose = script.poseMatrix(stock, group);
+                if (pose != null) {
+                    if (m == null) {
+                        m = pose;
+                    } else {
+                        m.multiply(pose);
+                    }
+                }
+            }
             return m;
         };
-        this.base = ModelState.construct(settings -> settings.add(animators).add(interiorLit));
+        ModelState.GroupVisibility scriptVisibility = (stock, group) -> script == null ? null : script.visibility(stock, group);
+        ModelState.GroupSurface surface = new ModelState.GroupSurface() {
+            @Override
+            public Boolean glow(EntityMoveableRollingStock stock, String group) {
+                return script == null ? null : script.glow(stock, group);
+            }
+
+            @Override
+            public Float alpha(EntityMoveableRollingStock stock, String group) {
+                return script == null ? null : script.alpha(stock, group);
+            }
+
+            @Override
+            public Texture texture(EntityMoveableRollingStock stock, String group) {
+                return gifTexture(stock, group);
+            }
+        };
+        this.base = ModelState.construct(settings -> settings.add(animators).add(interiorLit).add(scriptVisibility).surface(surface));
 
         ComponentProvider provider = new ComponentProvider(this, def.internal_model_scale, def.widgetConfig);
         initStates();
@@ -253,7 +296,23 @@ public class StockModel<ENTITY extends EntityMoveableRollingStock, DEFINITION ex
 
 
     public final void onClientTick(EntityMoveableRollingStock stock) {
+        if (script != null) {
+            script.clientTick(stock);
+        }
         effects((ENTITY) stock);
+    }
+
+    public final void onServerTick(EntityMoveableRollingStock stock) {
+        if (script != null) {
+            script.serverTick(stock);
+        }
+    }
+
+    public final void discardScript(EntityMoveableRollingStock stock) {
+        if (script != null) {
+            script.forget(stock.getUUID());
+        }
+        lodCache.remove(stock.getUUID());
     }
 
     protected void effects(ENTITY stock) {
@@ -300,8 +359,6 @@ public class StockModel<ENTITY extends EntityMoveableRollingStock, DEFINITION ex
         customSounds.forEach(s -> s.removed(stock));
     }
 
-    private int lod_level = LOD_LARGE;
-    private int lod_tick = 0;
     public final void renderEntity(EntityMoveableRollingStock stock, RenderState state, float partialTicks) {
         List<ModelComponentType> available = stock.isBuilt() ? null : stock.getItemComponents()
                 .stream().flatMap(x -> x.render.stream())
@@ -317,24 +374,10 @@ public class StockModel<ENTITY extends EntityMoveableRollingStock, DEFINITION ex
             state = state.shader(ConfigGraphics.OptiFineEntityShader);
         }
 
-        // Refresh LOD every 0.5s
-        if (lod_tick + 10 < stock.getTickCount() || lod_tick > stock.getTickCount())  {
-            lod_tick = stock.getTickCount();
+        int lodLevel = resolveLod(stock);
+        prepareGifGroups(stock);
 
-            double playerDistanceSq = stock.getWorld().getEntities(stock.getClass()).stream()
-                    .filter(x -> Objects.equals(x.getDefinitionID(), stock.getDefinitionID()) && Objects.equals(x.getTexture(), stock.getTexture()))
-                    .mapToDouble(x -> x.getPosition().distanceToSquared(MinecraftClient.getPlayer().getPosition())).min().orElse(0);
-
-            if (playerDistanceSq > ConfigGraphics.StockLODDistance * 2 * ConfigGraphics.StockLODDistance * 2) {
-                lod_level = LOD_SMALL;
-            } else if (playerDistanceSq > ConfigGraphics.StockLODDistance * ConfigGraphics.StockLODDistance) {
-                lod_level = LOD_LARGE;
-            } else {
-                lod_level = cam72cam.mod.Config.MaxTextureSize;
-            }
-        }
-
-        ModelConfig cfg = new ModelConfig().variant(stock.getTexture()).lod(lod_level);
+        ModelConfig cfg = new ModelConfig().variant(stock.getTexture()).lod(lodLevel);
         try (
                 ModelRenderer.Binding bound = ModelRenderer.getRendererFor(this.model).bind(cfg, state);
         ) {
@@ -350,6 +393,62 @@ public class StockModel<ENTITY extends EntityMoveableRollingStock, DEFINITION ex
 
             stock.distanceTraveled = backup;
         }
+    }
+
+    private void prepareGifGroups(EntityMoveableRollingStock stock) {
+        if (def.gifBindings != null) {
+            for (String group : def.gifBindings.keySet()) {
+                GifUv.remapOnce(model, group);
+            }
+        }
+        if (script != null) {
+            for (String group : script.gifGroups(stock)) {
+                GifUv.remapOnce(model, group);
+            }
+        }
+    }
+
+    private Texture gifTexture(EntityMoveableRollingStock stock, String group) {
+        String path = script == null ? null : script.gifPath(stock, group);
+        if ((path == null || path.isEmpty()) && def.gifBindings != null) {
+            path = def.gifBindings.get(group);
+        }
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+        GifUv.remapOnce(model, group);
+        Identifier location = path.indexOf(':') >= 0 ? new Identifier(path) : def.modelLoc.getRelative(path);
+        if (location == null || !location.canLoad()) {
+            location = new Identifier(ImmersiveRailroading.MODID, path);
+        }
+        GifClip clip = GifClip.get(location);
+        return clip == null ? null : clip.frame(stock.getTickCount());
+    }
+
+    private int resolveLod(EntityMoveableRollingStock stock) {
+        int tick = stock.getTickCount();
+        int[] cached = lodCache.get(stock.getUUID());
+        if (cached != null && tick >= cached[0] && tick - cached[0] < 10) {
+            return cached[1];
+        }
+        double distance = ConfigGraphics.StockLODDistance;
+        double distanceSq = stock.getPosition().distanceToSquared(MinecraftClient.getPlayer().getPosition());
+        int lod;
+        if (ConfigGraphics.compactTextureMemory) {
+            int far = ConfigGraphics.stockFarTextureSize;
+            lod = distanceSq > distance * distance && far > 0 ? far : ConfigGraphics.stockTextureBudget;
+        } else if (distanceSq > distance * 2 * distance * 2) {
+            lod = LOD_SMALL;
+        } else if (distanceSq > distance * distance) {
+            lod = LOD_LARGE;
+        } else {
+            lod = cam72cam.mod.Config.MaxTextureSize;
+        }
+        if (lodCache.size() > 512) {
+            lodCache.clear();
+        }
+        lodCache.put(stock.getUUID(), new int[]{tick, lod});
+        return lod;
     }
 
     public void postRenderEntity(EntityMoveableRollingStock stock, RenderState state, float partialTicks) {

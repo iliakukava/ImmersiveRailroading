@@ -2,10 +2,12 @@ package cam72cam.immersiverailroading.entity;
 
 import cam72cam.immersiverailroading.Config;
 import cam72cam.immersiverailroading.ImmersiveRailroading;
+import cam72cam.immersiverailroading.net.RiderMotionPacket;
 import cam72cam.immersiverailroading.entity.EntityCoupleableRollingStock.CouplerType;
 import cam72cam.immersiverailroading.library.Permissions;
 import cam72cam.immersiverailroading.model.part.Door;
 import cam72cam.immersiverailroading.model.part.Seat;
+import cam72cam.mod.MinecraftClient;
 import cam72cam.mod.entity.Entity;
 import cam72cam.mod.entity.Player;
 import cam72cam.mod.entity.custom.IRidable;
@@ -35,6 +37,13 @@ public abstract class EntityRidableRollingStock extends EntityBuildableRollingSt
 
 	// Hack to remount players if they were seated
 	private final Map<UUID, Vec3d> remount = new HashMap<>();
+
+	/** Largest movement vector accepted from a client in one tick. Sprint input is 0.4. */
+	private static final double MAX_RIDER_STEP = 1.0;
+	private static final int RIDER_MOTION_TTL = 10;
+	private final Map<UUID, RiderMotion> riderMotion = new HashMap<>();
+	private Vec3d lastSentMotion;
+	private int lastSentMotionTick = -1000;
 
 
 
@@ -139,8 +148,50 @@ public abstract class EntityRidableRollingStock extends EntityBuildableRollingSt
 		            .isPresent();
 	}
 
+	/**
+	 * Records the walking input of the player who owns this client. The server applies it in
+	 * {@link #onPassengerUpdate} and UMC replicates the resulting seat offset to other clients.
+	 */
+	public void acceptRiderMotion(Player player, Vec3d movement) {
+		if (player == null || movement == null) {
+			return;
+		}
+		double length = movement.length();
+		if (length > MAX_RIDER_STEP) {
+			movement = movement.scale(MAX_RIDER_STEP / length);
+		}
+		riderMotion.put(player.getUUID(), new RiderMotion(movement, getTickCount()));
+	}
+
+	private Vec3d resolveRiderMotion(Player source) {
+		RiderMotion reported = riderMotion.get(source.getUUID());
+		if (getWorld().isServer && reported != null && getTickCount() - reported.tick <= RIDER_MOTION_TTL) {
+			return reported.movement;
+		}
+		return source.getMovementInput();
+	}
+
+	private void sendLocalRiderMotion() {
+		if (!getWorld().isClient) {
+			return;
+		}
+		Player self = MinecraftClient.getPlayer();
+		Entity riding = self == null ? null : self.getRiding();
+		if (riding == null || !getUUID().equals(riding.getUUID())) {
+			return;
+		}
+		Vec3d movement = self.getMovementInput();
+		boolean changed = lastSentMotion == null || lastSentMotion.distanceTo(movement) > 0.001;
+		if (!changed && getTickCount() - lastSentMotionTick < 4) {
+			return;
+		}
+		new RiderMotionPacket((EntityMoveableRollingStock) this, movement).sendToServer();
+		lastSentMotion = movement;
+		lastSentMotionTick = getTickCount();
+	}
+
 	private Vec3d playerMovement(Player source, Vec3d offset) {
-		Vec3d movement = source.getMovementInput();
+		Vec3d movement = resolveRiderMotion(source);
         /*
         if (sprinting) {
             movement = movement.scale(3);
@@ -198,6 +249,7 @@ public abstract class EntityRidableRollingStock extends EntityBuildableRollingSt
 	@Override
 	public void onTick() {
 		super.onTick();
+		sendLocalRiderMotion();
 
 		if (getWorld().isServer) {
 			remount.forEach((uuid, pos) -> {
@@ -257,6 +309,16 @@ public abstract class EntityRidableRollingStock extends EntityBuildableRollingSt
 		}
 
 		seatedPassengers.put(seat, player.getUUID());
+	}
+
+	private static final class RiderMotion {
+		final Vec3d movement;
+		final int tick;
+
+		RiderMotion(Vec3d movement, int tick) {
+			this.movement = movement;
+			this.tick = tick;
+		}
 	}
 
 	private static class PassengerMapper implements TagMapper<Map<UUID, Vec3d>> {

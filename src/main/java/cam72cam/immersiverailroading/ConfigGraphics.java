@@ -40,6 +40,17 @@ public class ConfigGraphics {
 	@Range(min = 0, max = 100)
     public static int textureCacheSeconds = 30;
 
+	@Comment("Keep only the texture sheets at or below stockTextureBudget. The loader builds one combined atlas per model; this drops the oversized copies so RAM and VRAM follow the budget instead of the largest atlas.")
+	public static boolean compactTextureMemory = true;
+
+	@Comment("Largest packed texture edge (pixels) kept resident for a nearby piece of stock. The full atlas is released when a sheet of this size exists.")
+	@Range(min = 128, max = 8192)
+	public static int stockTextureBudget = 1024;
+
+	@Comment("Smaller packed texture edge used past StockLODDistance. 0 keeps a single sheet at stockTextureBudget.")
+	@Range(min = 0, max = 4096)
+	public static int stockFarTextureSize = 512;
+
 	@Comment( "Show text tooltips over interactable components" )
 	public static boolean interactiveComponentsOverlay = true;
 
@@ -72,6 +83,9 @@ public class ConfigGraphics {
 
 	@Comment("Try to fake interior lighting for locomotives/passenger cars that are being ridden")
 	public static boolean FakeInteriorLighting = true;
+
+	@Comment("Show speed, cruise, throttle, grade, sand and slip while driving a locomotive")
+	public static boolean driverStrip = true;
 
 	@Comment("Disable headlights' texture render")
 	public static boolean DisableLightTextureRender = false;

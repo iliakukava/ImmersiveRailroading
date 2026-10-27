@@ -7,6 +7,8 @@ import cam72cam.immersiverailroading.gui.overlay.GuiBuilder;
 import cam72cam.immersiverailroading.items.ItemPaintBrush;
 import cam72cam.immersiverailroading.library.*;
 import cam72cam.immersiverailroading.model.StockModel;
+import cam72cam.immersiverailroading.model.format.IrObjParser;
+import cam72cam.mod.model.common.ModelLoader;
 import cam72cam.immersiverailroading.multiblock.*;
 import cam72cam.immersiverailroading.net.*;
 import cam72cam.immersiverailroading.registry.DefinitionManager;
@@ -70,6 +72,7 @@ public class ImmersiveRailroading extends ModCore.Mod {
 
 		switch (event) {
 			case CONSTRUCT:
+				ModelLoader.registerFormat("obj", IrObjParser::parse);
 				EntityRegistry.register(ImmersiveRailroading.instance, CarFreight::new, ImmersiveRailroading.ENTITY_SYNC_DISTANCE);
 				EntityRegistry.register(ImmersiveRailroading.instance, CarPassenger::new, ImmersiveRailroading.ENTITY_SYNC_DISTANCE);
 				EntityRegistry.register(ImmersiveRailroading.instance, CarTank::new, ImmersiveRailroading.ENTITY_SYNC_DISTANCE);
@@ -94,6 +97,7 @@ public class ImmersiveRailroading extends ModCore.Mod {
 				Packet.register(RemoteControlServerPacket::new, PacketDirection.ServerToClient);
 				Packet.register(RemoteControlClientPacket::new, PacketDirection.ClientToServer);
 				Packet.register(RemoteControlActivePacket::new, PacketDirection.ClientToServer);
+				Packet.register(RiderMotionPacket::new, PacketDirection.ClientToServer);
 
 				ServerChronoState.register();
 				WirelessRemoteControlServer.init();
@@ -104,6 +108,8 @@ public class ImmersiveRailroading extends ModCore.Mod {
 				DamageTypes.register();
 
 				Command.register(new IRCommand());
+				Command.register(new TrainActionCommand("crack", false));
+				Command.register(new TrainActionCommand("explossuion", true));
 
 				break;
 			case INITIALIZE:
@@ -205,6 +211,8 @@ public class ImmersiveRailroading extends ModCore.Mod {
 				Keyboard.registerKey("ir_keys.dead_mans_switch", KeyCode.MULTIPLY, "key.categories." + ImmersiveRailroading.MODID, onKeyPress.apply(KeyTypes.DEAD_MANS_SWITCH));
 				Keyboard.registerKey("ir_keys.start_stop_engine", KeyCode.ADD, "key.categories." + ImmersiveRailroading.MODID, onKeyPress.apply(KeyTypes.START_STOP_ENGINE));
 				Keyboard.registerKey("ir_keys.bell", KeyCode.SUBTRACT, "key.categories." + ImmersiveRailroading.MODID, onKeyPress.apply(KeyTypes.BELL));
+				Keyboard.registerKey("ir_keys.cruise", KeyCode.NUMPAD0, "key.categories." + ImmersiveRailroading.MODID, onKeyPress.apply(KeyTypes.CRUISE));
+				Keyboard.registerKey("ir_keys.sand", KeyCode.DECIMAL, "key.categories." + ImmersiveRailroading.MODID, onKeyPress.apply(KeyTypes.SAND));
 				Keyboard.registerKey("ir_keys.config", KeyCode.DIVIDE, "key.categories." + ImmersiveRailroading.MODID, () -> GuiTypes.CONFIG.open(MinecraftClient.getPlayer()));
 
 				Audio.setSoundChannels(ConfigSound.customAudioChannels);
@@ -213,6 +221,7 @@ public class ImmersiveRailroading extends ModCore.Mod {
 				GlobalRender.registerItemMouseover(IRItems.ITEM_TRACK_BLUEPRINT, TrackBlueprintItemModel::renderMouseover);
 				GlobalRender.registerItemMouseover(IRItems.ITEM_MANUAL, MBBlueprintRender::renderMouseover);
 
+				GlobalRender.registerOverlay((state, _) -> cam72cam.immersiverailroading.gui.overlay.DriverStrip.render());
 				GlobalRender.registerOverlay((state, _) -> {
 					Entity riding = MinecraftClient.getPlayer().getRiding();
 					if (!(riding instanceof EntityRollingStock)) {

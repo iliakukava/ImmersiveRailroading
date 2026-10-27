@@ -7,6 +7,7 @@ import cam72cam.immersiverailroading.model.components.ModelComponent;
 import cam72cam.mod.render.common.ModelRenderer;
 import cam72cam.mod.render.opengl.BlendMode;
 import cam72cam.mod.render.opengl.RenderState;
+import cam72cam.mod.render.opengl.Texture;
 import util.Matrix4;
 
 import java.util.*;
@@ -18,6 +19,7 @@ public class ModelState {
     private final GroupAnimator groupAnimator;
     private final GroupVisibility groupVisibility;
     private final Lighter lighter;
+    private final GroupSurface surface;
     private final List<ModelComponent> components;
 
     private final List<ModelState> children = new ArrayList<>();
@@ -26,13 +28,15 @@ public class ModelState {
             Animator animator,
             GroupAnimator groupAnimator,
             GroupVisibility groupVisibility,
-            Lighter lighter
+            Lighter lighter,
+            GroupSurface surface
     ) {
         this.components = new ArrayList<>();
         this.animator = animator;
         this.groupAnimator = groupAnimator;
         this.groupVisibility = groupVisibility;
         this.lighter = lighter;
+        this.surface = surface;
     }
 
 
@@ -181,6 +185,7 @@ public class ModelState {
             this.groupAnimator = parent.groupAnimator;
             this.groupVisibility = parent.groupVisibility;
             this.lighter = parent.lighter;
+            this.surface = parent.surface;
         }
 
         public Builder add(Animator animator) {
@@ -199,16 +204,33 @@ public class ModelState {
             this.lighter = this.lighter != null ? this.lighter.merge(lighter) : lighter;
             return this;
         }
+        public Builder surface(GroupSurface surface) {
+            this.surface = surface;
+            return this;
+        }
+
+        private GroupSurface surface;
 
         private ModelState build() {
             return new ModelState(
                     animator,
                     groupAnimator,
                     groupVisibility,
-                    lighter
+                    lighter,
+                    surface
             );
         }
-   }
+    }
+
+    /**
+     * Per-group look that scripts and material tokens add on top of the authored mesh.
+     * A null result means the group keeps its normal lighting, opacity, or atlas texture.
+     */
+    public interface GroupSurface {
+        Boolean glow(EntityMoveableRollingStock stock, String group);
+        Float alpha(EntityMoveableRollingStock stock, String group);
+        Texture texture(EntityMoveableRollingStock stock, String group);
+    }
 
     // TODO Lighting rework...
     public static final Pattern lcgPattern = Pattern.compile("_LCG_([^_]+)");
@@ -245,12 +267,18 @@ public class ModelState {
         Float blockLight = null;
         Float skyLight = null;
         boolean transparent = false;
+        Float alpha = null;
+        boolean glow = false;
+        Texture texture = null;
 
         boolean equals(GroupState other) {
             return Objects.equals(this.matrix, other.matrix) &&
                     Objects.equals(this.blockLight, other.blockLight) &&
                     Objects.equals(this.skyLight, other.skyLight) &&
-                    this.transparent == other.transparent;
+                    this.transparent == other.transparent &&
+                    Objects.equals(this.alpha, other.alpha) &&
+                    this.glow == other.glow &&
+                    this.texture == other.texture;
         }
 
         void copyFrom(GroupState other) {
@@ -258,6 +286,9 @@ public class ModelState {
             this.blockLight = other.blockLight;
             this.skyLight = other.skyLight;
             this.transparent = other.transparent;
+            this.alpha = other.alpha;
+            this.glow = other.glow;
+            this.texture = other.texture;
         }
 
         void reset() {
@@ -265,6 +296,9 @@ public class ModelState {
             this.blockLight = null;
             this.skyLight = null;
             this.transparent = false;
+            this.alpha = null;
+            this.glow = false;
+            this.texture = null;
         }
     }
 
@@ -303,18 +337,6 @@ public class ModelState {
         GroupState next = new GroupState();
         List<String> currentGroups = new ArrayList<>(groups.size());
 
-        Consumer<RenderState> currentModifier = state -> {
-            if (matrix != null) {
-                state.model_view().multiply(matrix);
-            }
-            if (current.matrix != null) {
-                state.model_view().multiply(current.matrix);
-            }
-            if (current.blockLight != null && current.skyLight != null) {
-                state.lightmap(current.blockLight, current.skyLight);
-            }
-        };
-
         for (ModelComponent.ModelGroupData group : groups) {
             if (group.transparent && !ConfigGraphics.RenderSemiTransparentParts) {
                 // Don't render the group
@@ -330,9 +352,19 @@ public class ModelState {
             Float lcgValue = group.LCG != null ? stock.getControlPosition(group.LCG) : null;
             lcgValue = lcgValue == null ? null : group.linvert ? 1 - lcgValue : lcgValue;
 
+            Boolean scriptGlow = surface == null ? null : surface.glow(stock, group.modelID);
+            Float scriptAlpha = surface == null ? null : surface.alpha(stock, group.modelID);
+            next.glow = Boolean.TRUE.equals(scriptGlow) || (fullBright && group.fullbright);
+            next.texture = surface == null ? null : surface.texture(stock, group.modelID);
+            if (scriptAlpha != null) {
+                next.alpha = scriptAlpha;
+            } else if (group.glass) {
+                next.alpha = 0.35f;
+            }
+
             // TODO additional null checks around lighting fields
             if (lcgValue == null || lcgValue > 0) {
-                if (fullBright && group.fullbright) {
+                if (next.glow) {
                     next.blockLight = 1F;
                     next.skyLight = 1F;
                 } else if (lighting.interiorLight != null) {
@@ -346,7 +378,7 @@ public class ModelState {
                 }
             }
 
-            next.transparent = group.transparent;
+            next.transparent = group.transparent || (next.alpha != null && next.alpha < 0.99f);
 
             // See if we are still part of the current render group
             if (current.equals(next)) {
@@ -355,14 +387,7 @@ public class ModelState {
                 continue;
             }
 
-            // Flush
-            if (!currentGroups.isEmpty()) {
-                if (current.transparent) {
-                    binding.enqueueTransparent(currentGroups, currentModifier);
-                } else {
-                    binding.enqueueOpaque(currentGroups, currentModifier);
-                }
-            }
+            flushGroups(binding, matrix, current, currentGroups);
 
             // Start tracking the next set of groups
             currentGroups.clear();
@@ -370,17 +395,50 @@ public class ModelState {
             current.copyFrom(next);
         }
 
-        // Flush
-        if (!currentGroups.isEmpty()) {
-            if (current.transparent) {
-                binding.enqueueTransparent(currentGroups, currentModifier);
-            } else {
-                binding.enqueueOpaque(currentGroups, currentModifier);
-            }
-        }
+        flushGroups(binding, matrix, current, currentGroups);
 
         for (ModelState child : children) {
             child.render(binding, stock, available, partialTicks);
+        }
+    }
+
+    private static void flushGroups(ModelRenderer.Binding binding, Matrix4 matrix, GroupState state, List<String> groups) {
+        if (groups.isEmpty()) {
+            return;
+        }
+        Matrix4 groupMatrix = state.matrix;
+        Float blockLight = state.blockLight;
+        Float skyLight = state.skyLight;
+        Float alpha = state.alpha;
+        boolean glow = state.glow;
+        Texture texture = state.texture;
+        Consumer<RenderState> modifier = renderState -> {
+            if (matrix != null) {
+                renderState.model_view().multiply(matrix);
+            }
+            if (groupMatrix != null) {
+                renderState.model_view().multiply(groupMatrix);
+            }
+            if (glow) {
+                renderState.lightmap(1f, 1f);
+            } else if (blockLight != null && skyLight != null) {
+                renderState.lightmap(blockLight, skyLight);
+            }
+            if (alpha != null) {
+                renderState.color(1f, 1f, 1f, alpha);
+                renderState.alpha_test(false);
+                renderState.blend(ALPHA_BLEND);
+                renderState.depth_mask(alpha > 0.95f);
+            }
+            if (texture != null) {
+                renderState.texture(texture);
+            }
+        };
+        List<String> batch = new ArrayList<>(groups);
+        if (state.transparent) {
+            binding.enqueueTransparent(batch, modifier);
+        } else {
+            binding.enqueueOpaque(batch, modifier);
         }
     }
 }
