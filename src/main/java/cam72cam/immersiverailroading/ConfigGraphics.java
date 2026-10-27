@@ -84,6 +84,9 @@ public class ConfigGraphics {
 	@Comment("Try to fake interior lighting for locomotives/passenger cars that are being ridden")
 	public static boolean FakeInteriorLighting = true;
 
+	@Comment("Show speed, cruise, throttle, grade, sand and slip while driving a locomotive")
+	public static boolean driverStrip = true;
+
 	@Comment("Disable headlights' texture render")
 	public static boolean DisableLightTextureRender = false;
 

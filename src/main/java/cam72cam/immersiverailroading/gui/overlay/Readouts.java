@@ -35,6 +35,8 @@ public enum Readouts {
     ENGINE_RPM,
     TENDER_FEED,
     EMERGENCY,
+    CRUISE,
+    SAND,
     ;
 
     public float getValue(EntityRollingStock stock) {
@@ -118,6 +120,17 @@ public enum Readouts {
             case TENDER_FEED ->
                     stock instanceof LocomotiveSteam steam && steam.isAutoFeedEnabled() ? 1 : 0;
             case EMERGENCY -> stock instanceof Locomotive loco && loco.getEmergency() ? 1 : 0;
+            case CRUISE -> {
+                if (stock instanceof Locomotive loco && loco.isCruiseEngaged()) {
+                    double maxSpeed = loco.getDefinition().getMaxSpeed(stock.gauge).metric();
+                    if (maxSpeed == 0) {
+                        maxSpeed = 200;
+                    }
+                    yield (float) Math.min(1, Math.abs(loco.getCruiseTarget()) / maxSpeed);
+                }
+                yield 0;
+            }
+            case SAND -> stock instanceof Locomotive loco && loco.isSanding() ? 1 : 0;
             default -> 0;
         };
     }

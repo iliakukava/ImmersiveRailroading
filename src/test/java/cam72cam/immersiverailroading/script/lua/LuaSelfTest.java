@@ -1,5 +1,6 @@
 package cam72cam.immersiverailroading.script.lua;
 
+import cam72cam.immersiverailroading.entity.CruiseControl;
 import cam72cam.immersiverailroading.model.TextureBudget;
 import cam72cam.immersiverailroading.registry.PackLoadReport;
 import cam72cam.immersiverailroading.render.GifTimeline;
@@ -23,6 +24,7 @@ public final class LuaSelfTest {
         textureBudget();
         packReport();
         gifTimeline();
+        cruise();
         if (failures > 0) {
             throw new AssertionError(failures + " check(s) failed");
         }
@@ -160,6 +162,17 @@ public final class LuaSelfTest {
         if (!TextureBudget.lodSizes(1024, true, 1024, 512).equals(List.of(512))) {
             fail("a budget equal to the device max must not duplicate the full atlas");
         }
+    }
+
+    private static void cruise() {
+        eq(40, CruiseControl.engageTarget(0, 1), "cruise from stop");
+        eq(-40, CruiseControl.engageTarget(1, -1), "cruise follows reverser at rest");
+        eq(88, CruiseControl.engageTarget(88, 1), "cruise holds current speed");
+        eq(45, CruiseControl.nudge(40, 1, true), "cruise faster");
+        eq(0, CruiseControl.nudge(5, 1, false), "cruise down to stop");
+        eq(0.04f + 0.04f, CruiseControl.nextThrottle(0.04f, 0.04f, 10, 40), "needs more throttle");
+        eq(0.4f, CruiseControl.nextThrottle(0.4f, 0.04f, 40, 40), "holds inside the band");
+        eq(0.4f - 0.04f, CruiseControl.nextThrottle(0.4f, 0.04f, 50, 40), "too fast, ease off");
     }
 
     private static void gifTimeline() {

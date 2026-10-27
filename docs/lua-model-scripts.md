@@ -56,6 +56,9 @@
 | `gif(group, path)` | кадры GIF на гранях группы |
 | `part(group)` | тот же набор методов на одной детали: `move`, `rotate`, `scale`, `pivot`, `glow`, `alpha`, `visible`, `gif` |
 | `throttle` / `set_throttle` | тяга локомотива 0..1 |
+| `cruise()` / `set_cruise(kmh)` | удержание скорости, `nil` выключает |
+| `sand()` / `set_sand(on)` | короткий выброс песка, сцепление колёс выше |
+| `slipping()` | боксование |
 | `reverser` / `set_reverser` | реверс -1..1 |
 | `train_brake` / `set_train_brake` | поездной тормоз |
 | `independent_brake` / `set_independent_brake` | независимый тормоз |

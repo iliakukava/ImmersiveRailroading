@@ -39,6 +39,21 @@ public abstract class Locomotive extends FreightTank {
 	private float throttle = 0;
 
 	@TagSync
+	@TagField("CRUISE")
+	private boolean cruise;
+
+	@TagSync
+	@TagField("CRUISE_TARGET")
+	private float cruiseTarget;
+
+	@TagSync
+	@TagField("SAND")
+	private int sandTicks;
+	private int sandCooldown;
+	private static final int SAND_BURST_TICKS = 120;
+	private static final int SAND_COOLDOWN_TICKS = 40;
+
+	@TagSync
 	@TagField("REVERSER")
 	private float reverser = 0;
 
@@ -153,15 +168,33 @@ public abstract class Locomotive extends FreightTank {
 				}
             break;
 		case THROTTLE_UP:
+			if (adjustCruise(source, true)) {
+				break;
+			}
 			setThrottle(getThrottle() + getThrottleDelta());
 			break;
 		case THROTTLE_ZERO:
+			disengageCruise();
 			setThrottle(0f);
 			break;
 		case THROTTLE_DOWN:
+			if (adjustCruise(source, false)) {
+				break;
+			}
 			setThrottle(getThrottle() - getThrottleDelta());
 			break;
+		case CRUISE:
+			if (getWorld().isServer) {
+				toggleCruise(source);
+			}
+			break;
+		case SAND:
+			if (getWorld().isServer) {
+				requestSand(source);
+			}
+			break;
 		case REVERSER_UP:
+			disengageCruise();
 			if (linkThrottleReverser) {
 				float mixed = getThrottle() * (getReverser() >= 0 ? 1 : -1);
 				if (mixed < 0) {
@@ -176,12 +209,14 @@ public abstract class Locomotive extends FreightTank {
 			}
 			break;
 		case REVERSER_ZERO:
+			disengageCruise();
 			if (linkThrottleReverser) {
 				setRealThrottle(0);
 			}
 			setReverser(0f);
 			break;
 		case REVERSER_DOWN:
+			disengageCruise();
 			if (linkThrottleReverser) {
 				float mixed = getThrottle() * (getReverser() >= 0 ? 1 : -1);
 				if (mixed > 0) {
@@ -196,12 +231,15 @@ public abstract class Locomotive extends FreightTank {
 			}
 			break;
 		case TRAIN_BRAKE_UP:
+			disengageCruise();
 			setTrainBrake(getTrainBrake() + trainBrakeNotch);
 			break;
 		case TRAIN_BRAKE_ZERO:
+			disengageCruise();
 			setTrainBrake(0f);
 			break;
 		case TRAIN_BRAKE_DOWN:
+			disengageCruise();
 			setTrainBrake(getTrainBrake() - trainBrakeNotch);
 			break;
 		case DEAD_MANS_SWITCH:
@@ -379,9 +417,22 @@ public abstract class Locomotive extends FreightTank {
 					this.setTrainBrake(1);
 				}
 			}
+			if (emergency || isDerailed()) {
+				disengageCruise();
+			}
+			if (sandTicks > 0) {
+				sandTicks--;
+			} else if (sandCooldown > 0) {
+				sandCooldown--;
+			}
 			if (emergency) {
 				this.setThrottle(0);
 				this.setTrainBrake(1);
+			} else if (cruise && getTickCount() % 5 == 0) {
+				float next = CruiseControl.nextThrottle(getThrottle(), getThrottleDelta(), getCurrentSpeed().metric(), cruiseTarget);
+				if (next != getThrottle()) {
+					setThrottle(next);
+				}
 			}
 			if (hornTime > 0) {
 				hornTime--;
@@ -438,6 +489,7 @@ public abstract class Locomotive extends FreightTank {
 				* 9.8 // M/S/S
 				* (slipping ? STEEL.kineticFriction(STEEL)/2 : STEEL.staticFriction(STEEL))
 				* slipCoefficient(speed)
+				* (isSanding() ? 1.7 : 1)
 				* (4/getDefinition().factorOfAdhesion()) // Physics are tuned to an adhesion factor of 4
 				* Config.ConfigBalance.tractionMultiplier;
 	}
@@ -515,6 +567,91 @@ public abstract class Locomotive extends FreightTank {
 			((Locomotive) stock).setRealTrainBrake(this.getTrainBrake());
 			((Locomotive) stock).setRealIndependentBrake(this.getIndependentBrake());
 		}
+	}
+
+	public boolean isSlipping() {
+		return slipping;
+	}
+
+	public boolean isCruiseEngaged() {
+		return cruise;
+	}
+
+	public float getCruiseTarget() {
+		return cruiseTarget;
+	}
+
+	public void setCruiseTarget(float kmh) {
+		if (!getWorld().isServer) {
+			return;
+		}
+		cruiseTarget = (float) Math.max(-CruiseControl.MAX_TARGET_KMH, Math.min(CruiseControl.MAX_TARGET_KMH, kmh));
+		cruise = Math.abs(cruiseTarget) >= 1f;
+	}
+
+	public void disengageCruise() {
+		cruise = false;
+	}
+
+	public boolean isSanding() {
+		return sandTicks > 0;
+	}
+
+	public void setSanding(boolean enabled) {
+		if (!getWorld().isServer) {
+			return;
+		}
+		if (enabled) {
+			if (sandTicks == 0 && sandCooldown == 0) {
+				sandTicks = SAND_BURST_TICKS;
+				sandCooldown = SAND_COOLDOWN_TICKS;
+			}
+		} else {
+			sandTicks = 0;
+		}
+	}
+
+	private void toggleCruise(Player source) {
+		if (cruise) {
+			disengageCruise();
+			source.sendMessage(ChatText.CRUISE_OFF.getMessage());
+			return;
+		}
+		cruiseTarget = (float) CruiseControl.engageTarget(getCurrentSpeed().metric(), getReverser());
+		cruise = true;
+		source.sendMessage(ChatText.CRUISE_ON.getMessage(Math.round(Math.abs(displayCruise()))));
+	}
+
+	private boolean adjustCruise(Player source, boolean faster) {
+		if (!cruise) {
+			return false;
+		}
+		double next = CruiseControl.nudge(cruiseTarget, getReverser(), faster);
+		if (Math.abs(next) < 1) {
+			disengageCruise();
+			source.sendMessage(ChatText.CRUISE_OFF.getMessage());
+			return true;
+		}
+		cruiseTarget = (float) next;
+		source.sendMessage(ChatText.CRUISE_ON.getMessage(Math.round(Math.abs(displayCruise()))));
+		return true;
+	}
+
+	private void requestSand(Player source) {
+		if (sandTicks > 0 || sandCooldown > 0) {
+			return;
+		}
+		sandTicks = SAND_BURST_TICKS;
+		sandCooldown = SAND_COOLDOWN_TICKS;
+		source.sendMessage(ChatText.SAND.getMessage());
+	}
+
+	private double displayCruise() {
+		return switch (cam72cam.immersiverailroading.ConfigGraphics.speedUnit) {
+			case mph -> Speed.fromMetric(cruiseTarget).imperial();
+			case ms -> Speed.fromMetric(cruiseTarget).metersPerSecond();
+			case kmh -> cruiseTarget;
+		};
 	}
 
 	public float getThrottle() {

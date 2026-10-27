@@ -344,6 +344,30 @@ public final class ModelScript {
             return List.of();
         }));
         api.set("part", LuaValue.function((rt, args) -> List.of(partTable(stock, server, arg(args, 0).asString()))));
+        api.set("slipping", LuaValue.function((rt, args) -> List.of(LuaValue.bool(stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco && loco.isSlipping()))));
+        api.set("sand", LuaValue.function((rt, args) -> List.of(LuaValue.bool(stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco && loco.isSanding()))));
+        api.set("set_sand", LuaValue.function((rt, args) -> {
+            if (server && stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco) {
+                loco.setSanding(arg(args, 0).isNil() || arg(args, 0).isTruthy());
+            }
+            return List.of();
+        }));
+        api.set("cruise", LuaValue.function((rt, args) -> {
+            if (stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco && loco.isCruiseEngaged()) {
+                return List.of(LuaValue.number(loco.getCruiseTarget()));
+            }
+            return List.of(LuaValue.NIL);
+        }));
+        api.set("set_cruise", LuaValue.function((rt, args) -> {
+            if (server && stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco) {
+                if (arg(args, 0).isNil()) {
+                    loco.disengageCruise();
+                } else {
+                    loco.setCruiseTarget((float) arg(args, 0).asNumber(0));
+                }
+            }
+            return List.of();
+        }));
         api.set("throttle", LuaValue.function((rt, args) -> List.of(LuaValue.number(readThrottle(stock)))));
         api.set("set_throttle", LuaValue.function((rt, args) -> {
             if (server) {
