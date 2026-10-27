@@ -34,6 +34,7 @@ import java.awt.geom.Path2D;
 import java.awt.geom.Rectangle2D;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -111,6 +112,9 @@ public abstract class EntityRollingStockDefinition {
     public Map<String, DataBlock> widgetConfig;
 
     public List<StockSound> customSounds;
+
+    public String scriptName;
+    public String scriptSource;
 
     public NavMesh navMesh;
 
@@ -607,6 +611,28 @@ public abstract class EntityRollingStockDefinition {
         DataBlock widgets = data.getBlock("widgets");
         if (widgets != null) {
             widgetConfig = widgets.getBlockMap();
+        }
+        loadScript(data);
+    }
+
+    private void loadScript(DataBlock data) throws IOException {
+        String raw = data.getValue("script").asString();
+        if (raw == null || raw.trim().isEmpty()) {
+            return;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.indexOf('\n') >= 0 || trimmed.startsWith("--") || trimmed.startsWith("function") || trimmed.startsWith("local ")) {
+            scriptName = defID + "#script";
+            scriptSource = raw;
+            return;
+        }
+        Identifier script = data.getValue("script").asIdentifier();
+        scriptName = script == null ? trimmed : script.toString();
+        if (script == null || !script.canLoad()) {
+            throw new IOException("Lua script not found: '" + trimmed + "'. Use a pack path such as rolling_stock/locomotives/engine.lua, or paste the script inline.");
+        }
+        try (InputStream in = script.getResourceStream()) {
+            scriptSource = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
 

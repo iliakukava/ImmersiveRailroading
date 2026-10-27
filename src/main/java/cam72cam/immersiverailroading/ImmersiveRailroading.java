@@ -94,6 +94,7 @@ public class ImmersiveRailroading extends ModCore.Mod {
 				Packet.register(RemoteControlServerPacket::new, PacketDirection.ServerToClient);
 				Packet.register(RemoteControlClientPacket::new, PacketDirection.ClientToServer);
 				Packet.register(RemoteControlActivePacket::new, PacketDirection.ClientToServer);
+				Packet.register(RiderMotionPacket::new, PacketDirection.ClientToServer);
 
 				ServerChronoState.register();
 				WirelessRemoteControlServer.init();

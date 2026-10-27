@@ -4,6 +4,7 @@ import cam72cam.immersiverailroading.entity.EntityCoupleableRollingStock;
 import cam72cam.immersiverailroading.entity.EntityRollingStock;
 import cam72cam.immersiverailroading.entity.Freight;
 import cam72cam.immersiverailroading.registry.DefinitionManager;
+import cam72cam.immersiverailroading.registry.PackLoadReport;
 import cam72cam.mod.entity.Player;
 import cam72cam.mod.entity.boundingbox.IBoundingBox;
 import cam72cam.mod.item.ItemStack;
@@ -29,7 +30,7 @@ public class IRCommand extends Command {
 
 	@Override
 	public String getUsage() {
-		return "Usage: " + ImmersiveRailroading.MODID + " (reload|debug)";
+		return "Usage: " + ImmersiveRailroading.MODID + " (debug|packreport|cargoFill)";
 	}
 
 	@Override
@@ -75,6 +76,15 @@ public class IRCommand extends Command {
 			return true;
 		}
 		
+		if (args[0].equals("packreport")) {
+			PackLoadReport report = DefinitionManager.getPackReport();
+			String text = report == null ? "Packs have not been loaded yet." : report.format();
+			for (String line : text.split("\n")) {
+				sender.accept(PlayerMessage.direct(line));
+			}
+			return true;
+		}
+
 		if (args[0].equals("debug")) {
 			if (player.isPresent()) {
 				List<EntityRollingStock> ents = player.get().getWorld().getEntities(EntityRollingStock.class);

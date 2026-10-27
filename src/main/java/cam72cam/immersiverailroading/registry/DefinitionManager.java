@@ -27,6 +27,7 @@ public class DefinitionManager {
     private static Map<String, EntityRollingStockDefinition> definitions;
     private static BiMultiMap<String, EntityRollingStockDefinition> stockTags;
     private static Map<String, TrackDefinition> tracks;
+    private static PackLoadReport packReport = new PackLoadReport();
     private static final Map<String, StockLoader> stockLoaders;
 
     static {
@@ -56,19 +57,7 @@ public class DefinitionManager {
             Gauge.remove(value.value());
         }
 
-        List<DataBlock> blocks = new ArrayList<>();
-
-        Identifier gauges_json = new Identifier(ImmersiveRailroading.MODID, "rolling_stock/gauges.json");
-        List<InputStream> inputs = gauges_json.getResourceStreamAll();
-        for (InputStream input : inputs) {
-            blocks.add(JSON.parse(input));
-        }
-
-        Identifier gauges_caml = new Identifier(ImmersiveRailroading.MODID, "rolling_stock/gauges.caml");
-        inputs = gauges_caml.getResourceStreamAll();
-        for (InputStream input : inputs) {
-            blocks.add(CAML.parse(input));
-        }
+        List<DataBlock> blocks = readPackIndex("rolling_stock/gauges.json", "rolling_stock/gauges.caml");
 
         List<Double> toRemove = new ArrayList<>();
 
@@ -161,9 +150,20 @@ public class DefinitionManager {
         } catch (Exception e) {
             throw new RuntimeException("Unable to load tracks, do you have a broken pack?", e);
         }
+        String report = packReport.format();
+        if (packReport.hasFailures()) {
+            ImmersiveRailroading.error(report);
+        } else {
+            ImmersiveRailroading.info(report);
+        }
+    }
+
+    public static PackLoadReport getPackReport() {
+        return packReport;
     }
 
     private static void initModels() throws IOException {
+        packReport = new PackLoadReport();
         ImmersiveRailroading.info("Loading stock models.");
 
         Set<String> defTypes = stockLoaders.keySet();
@@ -172,19 +172,7 @@ public class DefinitionManager {
         LinkedHashMap<String, String> definitionIDMap = new LinkedHashMap<>();
         Map<String, DataBlock.Value> definitionIDPacks = new HashMap<>();
 
-        List<DataBlock> blocks = new ArrayList<>();
-
-        Identifier stock_json = new Identifier(ImmersiveRailroading.MODID, "rolling_stock/stock.json");
-        List<InputStream> inputs = stock_json.getResourceStreamAll();
-        for (InputStream input : inputs) {
-            blocks.add(JSON.parse(input));
-        }
-
-        Identifier stock_caml = new Identifier(ImmersiveRailroading.MODID, "rolling_stock/stock.caml");
-        inputs = stock_caml.getResourceStreamAll();
-        for (InputStream input : inputs) {
-            blocks.add(CAML.parse(input));
-        }
+        List<DataBlock> blocks = readPackIndex("rolling_stock/stock.json", "rolling_stock/stock.caml");
 
 
         for (DataBlock stock : blocks) {
@@ -193,6 +181,7 @@ public class DefinitionManager {
                 if (names != null) {
                     for (String defName : names.stream().map(DataBlock.Value::asString).collect(Collectors.toList())) {
                         if (blacklist.contains(defName)) {
+                            packReport.skipped(defName, "blacklisted");
                             ImmersiveRailroading.info("Skipping blacklisted %s", defName);
                             continue;
                         }
@@ -227,7 +216,9 @@ public class DefinitionManager {
                     resource = new Identifier(resource.getDomain(), resource.getPath().replace(".json", ".caml"));
                 }
                 if (!resource.canLoad()) {
-                    ImmersiveRailroading.error("Unable to load stock %s: file not found", defID);
+                    String message = "file not found. Looked for " + defID + " and the .caml sibling.";
+                    packReport.failed(defID, packName(definitionIDPacks.get(defID)), message, null);
+                    ImmersiveRailroading.error("Unable to load stock %s: %s", defID, message);
                     return null;
                 }
 
@@ -240,16 +231,18 @@ public class DefinitionManager {
 
                 EntityRollingStockDefinition stockDefinition = stockLoaders.get(defType).apply(defID, block);
 
-                Runtime runtime = Runtime.getRuntime();
-                if (runtime.freeMemory() < runtime.maxMemory() * 0.25) {
-                    System.out.println("GC");
-                    System.gc();
+                maybeCollectDuringLoad();
+                synchronized (stockTags) {
+                    stockDefinition.tags.forEach(tag -> stockTags.put(tag, stockDefinition));
                 }
-                stockDefinition.tags.forEach(tag -> stockTags.put(tag, stockDefinition));
+                packReport.loaded(stockDefinition.defID, stockDefinition.packName);
 
                 return Pair.of(stockDefinition.defID, stockDefinition);
             } catch (Exception e) {
-                ImmersiveRailroading.error("Error loading model %s of type %s", defID, defType);
+                String pack = packName(definitionIDPacks.get(defID));
+                String message = PackLoadReport.rootMessage(e);
+                packReport.failed(defID, pack, message, e);
+                ImmersiveRailroading.error("Error loading %s (%s) from pack %s: %s", defID, defType, pack, message);
                 ImmersiveRailroading.catching(e);
 
                 return null;
@@ -268,20 +261,7 @@ public class DefinitionManager {
 
     private static List<String> getModelBlacklist(Set<String> defTypes) throws IOException {
         List<String> blacklist = new ArrayList<>();
-
-        List<DataBlock> blocks = new ArrayList<>();
-
-        Identifier blacklist_json = new Identifier(ImmersiveRailroading.MODID, "rolling_stock/blacklist.json");
-        List<InputStream> inputs = blacklist_json.getResourceStreamAll();
-        for (InputStream input : inputs) {
-            blocks.add(JSON.parse(input));
-        }
-
-        Identifier blacklist_caml = new Identifier(ImmersiveRailroading.MODID, "rolling_stock/blacklist.caml");
-        inputs = blacklist_caml.getResourceStreamAll();
-        for (InputStream input : inputs) {
-            blocks.add(CAML.parse(input));
-        }
+        List<DataBlock> blocks = readPackIndex("rolling_stock/blacklist.json", "rolling_stock/blacklist.caml");
 
         for (DataBlock block : blocks) {
             for (String defType : defTypes) {
@@ -300,19 +280,7 @@ public class DefinitionManager {
 
         ImmersiveRailroading.info("Loading tracks.");
 
-        List<DataBlock> blocks = new ArrayList<>();
-
-        Identifier track_json = new Identifier(ImmersiveRailroading.MODID, "track/track.json");
-        List<InputStream> inputs = track_json.getResourceStreamAll();
-        for (InputStream input : inputs) {
-            blocks.add(JSON.parse(input));
-        }
-
-        Identifier track_caml = new Identifier(ImmersiveRailroading.MODID, "track/track.caml");
-        inputs = track_caml.getResourceStreamAll();
-        for (InputStream input : inputs) {
-            blocks.add(CAML.parse(input));
-        }
+        List<DataBlock> blocks = readPackIndex("track/track.json", "track/track.caml");
 
 
         for (DataBlock track : blocks) {
@@ -331,19 +299,26 @@ public class DefinitionManager {
                 }
 
                 if (!identifier.canLoad()) {
-                    ImmersiveRailroading.error("Unable to load track '%s': file not found", trackID);
+                    String message = "file not found. Looked for " + trackID + " and the .caml sibling.";
+                    packReport.failed(trackID, track.getValue("pack").asString(), message, null);
+                    ImmersiveRailroading.error("Unable to load track '%s': %s", trackID, message);
                     continue;
                 }
 
-                DataBlock block = DataBlock.load(identifier);
-
-                if (track.getValue("pack").asString() != null && block.getValue("pack").asString() != null) {
-                    // Copy in the pack name if not specified
-                    block.getValueMap().put("pack", track.getValue("pack"));
-                }
+                String pack = track.getValue("pack").asString();
                 try {
-                    tracks.put(trackID, new TrackDefinition(trackID, block));
+                    DataBlock block = DataBlock.load(identifier);
+
+                    if (pack != null && block.getValue("pack").asString() == null) {
+                        block.getValueMap().put("pack", track.getValue("pack"));
+                    }
+                    TrackDefinition definition = new TrackDefinition(trackID, block);
+                    tracks.put(trackID, definition);
+                    packReport.loaded(trackID, block.getValue("pack").asString(pack));
                 } catch (Exception e) {
+                    String message = PackLoadReport.rootMessage(e);
+                    packReport.failed(trackID, pack, message, e);
+                    ImmersiveRailroading.error("Unable to load track %s: %s", trackID, message);
                     ImmersiveRailroading.catching(e);
                 }
             }
@@ -408,6 +383,52 @@ public class DefinitionManager {
             def = tracks.values().stream().findFirst().get();
         }
         return def;
+    }
+
+    private static List<DataBlock> readPackIndex(String jsonPath, String camlPath) throws IOException {
+        List<DataBlock> blocks = new ArrayList<>();
+        blocks.addAll(readAll(jsonPath, false));
+        blocks.addAll(readAll(camlPath, true));
+        return blocks;
+    }
+
+    private static List<DataBlock> readAll(String path, boolean caml) throws IOException {
+        Identifier identifier = new Identifier(ImmersiveRailroading.MODID, path);
+        List<InputStream> inputs = identifier.getResourceStreamAll();
+        List<DataBlock> blocks = new ArrayList<>();
+        int index = 0;
+        for (InputStream input : inputs) {
+            index++;
+            try {
+                blocks.add(caml ? CAML.parse(input) : JSON.parse(input));
+            } catch (Exception e) {
+                throw new IOException("Failed to parse " + path + " (resource #" + index + "): " + PackLoadReport.rootMessage(e), e);
+            }
+        }
+        return blocks;
+    }
+
+    private static String packName(DataBlock.Value pack) {
+        if (pack == null) {
+            return null;
+        }
+        return pack.asString();
+    }
+
+    private static volatile long lastLoadGc;
+
+    private static void maybeCollectDuringLoad() {
+        Runtime runtime = Runtime.getRuntime();
+        if (runtime.freeMemory() >= runtime.maxMemory() * 0.25) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now - lastLoadGc < 1000) {
+            return;
+        }
+        lastLoadGc = now;
+        ImmersiveRailroading.info("Free memory is low while loading packs; requesting a collection");
+        System.gc();
     }
 
     @FunctionalInterface

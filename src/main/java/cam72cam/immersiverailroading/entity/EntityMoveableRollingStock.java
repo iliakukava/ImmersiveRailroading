@@ -266,6 +266,8 @@ public abstract class EntityMoveableRollingStock extends EntityRidableRollingSto
 
         if (getWorld().isClient) {
             getDefinition().getModel().onClientTick(this);
+        } else {
+            getDefinition().getModel().onServerTick(this);
         }
 
         // Apply position onTick
@@ -439,6 +441,7 @@ public abstract class EntityMoveableRollingStock extends EntityRidableRollingSto
     @Override
     public void onRemoved() {
         super.onRemoved();
+        this.getDefinition().getModel().discardScript(this);
 
         if (getWorld().isClient) {
             this.getDefinition().getModel().onClientRemoved(this);
