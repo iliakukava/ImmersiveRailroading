@@ -115,6 +115,7 @@ public abstract class EntityRollingStockDefinition {
 
     public String scriptName;
     public String scriptSource;
+    public final Map<String, String> gifBindings = new HashMap<>();
 
     public NavMesh navMesh;
 
@@ -613,6 +614,14 @@ public abstract class EntityRollingStockDefinition {
             widgetConfig = widgets.getBlockMap();
         }
         loadScript(data);
+        DataBlock gifs = data.getBlock("gifs");
+        if (gifs != null) {
+            gifs.getValueMap().forEach((key, value) -> {
+                if (value.asString() != null) {
+                    gifBindings.put(key, value.asString());
+                }
+            });
+        }
     }
 
     private void loadScript(DataBlock data) throws IOException {

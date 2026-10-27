@@ -85,6 +85,10 @@ public class IRCommand extends Command {
 			return true;
 		}
 
+		if (args[0].equals("crack") || args[0].equals("explossuion")) {
+			return new TrainActionCommand(args[0], args[0].equals("explossuion")).execute(sender, player, args);
+		}
+
 		if (args[0].equals("debug")) {
 			if (player.isPresent()) {
 				List<EntityRollingStock> ents = player.get().getWorld().getEntities(EntityRollingStock.class);

@@ -49,14 +49,44 @@
 | `coupled(side)` | сцепка спереди или сзади |
 | `rotate_group(group, x, y, z)` | градусы, поверх штатной анимации |
 | `translate_group(group, x, y, z)` | сдвиг в координатах модели |
+| `scale_group(group, x, y, z)` | масштаб; один аргумент масштабирует все оси |
+| `pivot_group(group, x, y, z)` | точка, вокруг которой крутится и масштабируется группа |
+| `set_glow(group, on)` | полное свечение группы |
+| `set_alpha(group, 0..1)` | прозрачность, в том числе стекло |
+| `gif(group, path)` | кадры GIF на гранях группы |
+| `part(group)` | тот же набор методов на одной детали: `move`, `rotate`, `scale`, `pivot`, `glow`, `alpha`, `visible`, `gif` |
+| `throttle` / `set_throttle` | тяга локомотива 0..1 |
+| `reverser` / `set_reverser` | реверс -1..1 |
+| `train_brake` / `set_train_brake` | поездной тормоз |
+| `independent_brake` / `set_independent_brake` | независимый тормоз |
+| `brake_pressure` `sliding` `derailed` | чтение состояния |
+| `horn(ticks)` `bell(ticks)` `emergency()` | свисток, звонок, экстренное |
+| `derail()` `explode()` | сход с рельс и взрыв состава, только сервер |
 | `group_visible(group, visible)` | `false` скрывает группу; `nil` снимает принудительную видимость |
-| `clear_pose()` / `clear_pose(group)` | сброс позы |
+| `clear_pose()` / `clear_pose(group)` | сброс позы, свечения, прозрачности и GIF |
 | `log(message)` | строка в лог мода |
 | `print(...)` | то же, глобальная функция |
 
 `group` — имя группы OBJ (`FAN_1`), `group` у контролов — control group (`CG` в имени или в `widgets`).
 
 Глобально доступны `math` (`abs`, `floor`, `ceil`, `sqrt`, `sin`, `cos`, `rad`, `deg`, `min`, `max`, `pi`), `string` (`len`, `sub`, `format`, `lower`, `upper`), `table.insert`, `table.remove`, `pairs`, `ipairs`, `type`, `tonumber`, `tostring`, `pcall`, `assert`.
+
+## Стекло, PBR и GIF
+
+Группа с `_GLASS_` в имени рисуется как стекло (альфа 0.35, смешивание). В MTL `d` и `Tr` пишут прозрачность в цвет вершины. `set_alpha` перекрывает оба варианта.
+
+Карты, которые уже выбирает рендер (в том числе Iris):
+
+- нормали и высота: `map_Bump`, `bump`, `map_Kn`, `map_height` или файл `*_n`
+- шероховатость и блик: `map_Pr`, `map_Ns`, `map_Ks` или файл `*_s`
+
+Высота попадает в слот нормалей так, как labPBR ждёт карту нормалей с высотой в альфе. Карту AO вшейте в альбедо: отдельного слота у рендера нет.
+
+GIF задаётся `stock.gif("SIGN", "ads.gif")`, `part("SIGN"):gif("ads.gif")` или блоком `gifs` в json определения. Кадры растягиваются на грани этой группы.
+
+## Команды из поезда
+
+`/crack` сходит с рельс всем сцепом, в котором вы сидите. `/explossuion` взрывает этот сцеп. Те же действия доступны скрипту: `stock.derail()` и `stock.explode()`.
 
 ## Пример
 

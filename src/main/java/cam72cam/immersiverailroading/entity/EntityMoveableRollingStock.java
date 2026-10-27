@@ -54,6 +54,10 @@ public abstract class EntityMoveableRollingStock extends EntityRidableRollingSto
     @TagField("SLIDING")
     public boolean sliding = false;
 
+    @TagSync
+    @TagField("DERAILED")
+    private boolean derailed = false;
+
     public long lastCollision = 0;
 
     public boolean newlyPlaced = false;
@@ -486,6 +490,52 @@ public abstract class EntityMoveableRollingStock extends EntityRidableRollingSto
 
     public float getBrakePressure() {
         return trainBrakePressure;
+    }
+
+    public boolean isDerailed() {
+        return derailed;
+    }
+
+    public void derailConsist() {
+        if (this instanceof EntityCoupleableRollingStock coupled) {
+            coupled.mapTrain(coupled, true, stock -> {
+                if (stock instanceof EntityMoveableRollingStock moveable) {
+                    moveable.markDerailed();
+                }
+            });
+        } else {
+            markDerailed();
+        }
+    }
+
+    public void explodeConsist() {
+        List<EntityMoveableRollingStock> cars = new ArrayList<>();
+        if (this instanceof EntityCoupleableRollingStock coupled) {
+            coupled.mapTrain(coupled, true, stock -> {
+                if (stock instanceof EntityMoveableRollingStock moveable) {
+                    cars.add(moveable);
+                }
+            });
+        } else {
+            cars.add(this);
+        }
+        for (EntityMoveableRollingStock car : cars) {
+            car.createExplosion(car.getPosition(), 8f, true);
+            car.kill();
+        }
+    }
+
+    private void markDerailed() {
+        derailed = true;
+        sliding = true;
+        SimulationState state = getCurrentState();
+        if (state != null) {
+            state.dirty = true;
+            state.atRest = false;
+            if (Math.abs(state.velocity) < 0.08) {
+                state.velocity = Math.copySign(0.25, state.velocity == 0 ? 1 : state.velocity);
+            }
+        }
     }
 
     @Deprecated

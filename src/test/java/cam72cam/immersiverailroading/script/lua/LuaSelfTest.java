@@ -2,6 +2,7 @@ package cam72cam.immersiverailroading.script.lua;
 
 import cam72cam.immersiverailroading.model.TextureBudget;
 import cam72cam.immersiverailroading.registry.PackLoadReport;
+import cam72cam.immersiverailroading.render.GifTimeline;
 
 import java.util.List;
 
@@ -21,6 +22,7 @@ public final class LuaSelfTest {
         errors();
         textureBudget();
         packReport();
+        gifTimeline();
         if (failures > 0) {
             throw new AssertionError(failures + " check(s) failed");
         }
@@ -157,6 +159,16 @@ public final class LuaSelfTest {
         }
         if (!TextureBudget.lodSizes(1024, true, 1024, 512).equals(List.of(512))) {
             fail("a budget equal to the device max must not duplicate the full atlas");
+        }
+    }
+
+    private static void gifTimeline() {
+        int[] delays = new int[] {2, 2, 4};
+        if (GifTimeline.frameAt(0, delays) != 0 || GifTimeline.frameAt(2, delays) != 1 || GifTimeline.frameAt(5, delays) != 2) {
+            fail("gif frame timing");
+        }
+        if (GifTimeline.frameAt(8, delays) != 0) {
+            fail("gif timeline should loop");
         }
     }
 

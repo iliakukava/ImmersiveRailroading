@@ -2,6 +2,7 @@ package cam72cam.immersiverailroading.entity.physics;
 
 import cam72cam.immersiverailroading.Config;
 import cam72cam.immersiverailroading.entity.EntityCoupleableRollingStock;
+import cam72cam.immersiverailroading.entity.EntityMoveableRollingStock;
 import cam72cam.immersiverailroading.entity.Locomotive;
 import cam72cam.immersiverailroading.entity.Tender;
 import cam72cam.immersiverailroading.entity.physics.chrono.ServerChronoState;
@@ -354,6 +355,10 @@ public class SimulationState {
     }
 
     private void moveAlongTrack(double distance) {
+        if (isDerailed()) {
+            driftOffTrack(distance);
+            return;
+        }
         Vec3d positionFront = VecUtil.fromWrongYawPitch(config.offsetFront, yaw, pitch).add(position);
         Vec3d positionRear = VecUtil.fromWrongYawPitch(config.offsetRear, yaw, pitch).add(position);
 
@@ -469,6 +474,29 @@ public class SimulationState {
         brakeAdhesionNewtons *= Config.ConfigBalance.brakeMultiplier;
 
         return rollingResistanceNewtons + blockResistanceNewtons + brakeAdhesionNewtons + directResistance + startingFriction;
+    }
+
+    private boolean isDerailed() {
+        EntityCoupleableRollingStock stock = config.world.getEntity(config.id, EntityCoupleableRollingStock.class);
+        return stock instanceof EntityMoveableRollingStock && ((EntityMoveableRollingStock) stock).isDerailed();
+    }
+
+    private void driftOffTrack(double distance) {
+        double along = Math.abs(distance) < 0.01 ? 0.05 : distance;
+        position = position.add(VecUtil.fromWrongYaw(along, yaw));
+        position = position.add(VecUtil.fromWrongYaw(Math.max(0.04, Math.abs(along) * 0.35), yaw + 90f));
+        yaw += 2.5f;
+        roll += 3.5f;
+        if (roll > 80f) {
+            roll = 80f;
+        } else if (roll < -80f) {
+            roll = -80f;
+        }
+        yawFront = yaw;
+        yawRear = yaw;
+        rollFront = roll;
+        rollRear = roll;
+        pitch *= 0.9f;
     }
 
     private boolean checkTileType(TileRailBase base, TrackItems type) {

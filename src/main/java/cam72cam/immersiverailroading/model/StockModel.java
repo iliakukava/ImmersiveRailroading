@@ -1,6 +1,7 @@
 package cam72cam.immersiverailroading.model;
 
 import cam72cam.immersiverailroading.ConfigGraphics;
+import cam72cam.immersiverailroading.ImmersiveRailroading;
 import cam72cam.immersiverailroading.ConfigSound;
 import cam72cam.immersiverailroading.entity.CarPassenger;
 import cam72cam.immersiverailroading.entity.EntityMoveableRollingStock;
@@ -15,12 +16,16 @@ import cam72cam.immersiverailroading.model.part.*;
 import cam72cam.immersiverailroading.model.part.TrackFollower.TrackFollowers;
 import cam72cam.immersiverailroading.registry.EntityRollingStockDefinition;
 import cam72cam.immersiverailroading.registry.EntityRollingStockDefinition.SoundDefinition;
+import cam72cam.immersiverailroading.render.GifClip;
+import cam72cam.immersiverailroading.render.GifUv;
 import cam72cam.immersiverailroading.script.ModelScript;
 import cam72cam.immersiverailroading.script.lua.LuaException;
 import cam72cam.immersiverailroading.sound.StockSound;
 import cam72cam.mod.MinecraftClient;
 import cam72cam.mod.model.common.ModelLoader;
 import cam72cam.mod.model.common.mesh.Model;
+import cam72cam.mod.render.opengl.Texture;
+import cam72cam.mod.resource.Identifier;
 import cam72cam.mod.render.OptiFine;
 import cam72cam.mod.render.common.ModelConfig;
 import cam72cam.mod.render.common.ModelRenderer;
@@ -156,7 +161,23 @@ public class StockModel<ENTITY extends EntityMoveableRollingStock, DEFINITION ex
             return m;
         };
         ModelState.GroupVisibility scriptVisibility = (stock, group) -> script == null ? null : script.visibility(stock, group);
-        this.base = ModelState.construct(settings -> settings.add(animators).add(interiorLit).add(scriptVisibility));
+        ModelState.GroupSurface surface = new ModelState.GroupSurface() {
+            @Override
+            public Boolean glow(EntityMoveableRollingStock stock, String group) {
+                return script == null ? null : script.glow(stock, group);
+            }
+
+            @Override
+            public Float alpha(EntityMoveableRollingStock stock, String group) {
+                return script == null ? null : script.alpha(stock, group);
+            }
+
+            @Override
+            public Texture texture(EntityMoveableRollingStock stock, String group) {
+                return gifTexture(stock, group);
+            }
+        };
+        this.base = ModelState.construct(settings -> settings.add(animators).add(interiorLit).add(scriptVisibility).surface(surface));
 
         ComponentProvider provider = new ComponentProvider(this, def.internal_model_scale, def.widgetConfig);
         initStates();
@@ -354,6 +375,7 @@ public class StockModel<ENTITY extends EntityMoveableRollingStock, DEFINITION ex
         }
 
         int lodLevel = resolveLod(stock);
+        prepareGifGroups(stock);
 
         ModelConfig cfg = new ModelConfig().variant(stock.getTexture()).lod(lodLevel);
         try (
@@ -371,6 +393,36 @@ public class StockModel<ENTITY extends EntityMoveableRollingStock, DEFINITION ex
 
             stock.distanceTraveled = backup;
         }
+    }
+
+    private void prepareGifGroups(EntityMoveableRollingStock stock) {
+        if (def.gifBindings != null) {
+            for (String group : def.gifBindings.keySet()) {
+                GifUv.remapOnce(model, group);
+            }
+        }
+        if (script != null) {
+            for (String group : script.gifGroups(stock)) {
+                GifUv.remapOnce(model, group);
+            }
+        }
+    }
+
+    private Texture gifTexture(EntityMoveableRollingStock stock, String group) {
+        String path = script == null ? null : script.gifPath(stock, group);
+        if ((path == null || path.isEmpty()) && def.gifBindings != null) {
+            path = def.gifBindings.get(group);
+        }
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+        GifUv.remapOnce(model, group);
+        Identifier location = path.indexOf(':') >= 0 ? new Identifier(path) : def.modelLoc.getRelative(path);
+        if (location == null || !location.canLoad()) {
+            location = new Identifier(ImmersiveRailroading.MODID, path);
+        }
+        GifClip clip = GifClip.get(location);
+        return clip == null ? null : clip.frame(stock.getTickCount());
     }
 
     private int resolveLod(EntityMoveableRollingStock stock) {

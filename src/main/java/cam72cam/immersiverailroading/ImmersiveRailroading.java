@@ -7,6 +7,8 @@ import cam72cam.immersiverailroading.gui.overlay.GuiBuilder;
 import cam72cam.immersiverailroading.items.ItemPaintBrush;
 import cam72cam.immersiverailroading.library.*;
 import cam72cam.immersiverailroading.model.StockModel;
+import cam72cam.immersiverailroading.model.format.IrObjParser;
+import cam72cam.mod.model.common.ModelLoader;
 import cam72cam.immersiverailroading.multiblock.*;
 import cam72cam.immersiverailroading.net.*;
 import cam72cam.immersiverailroading.registry.DefinitionManager;
@@ -70,6 +72,7 @@ public class ImmersiveRailroading extends ModCore.Mod {
 
 		switch (event) {
 			case CONSTRUCT:
+				ModelLoader.registerFormat("obj", IrObjParser::parse);
 				EntityRegistry.register(ImmersiveRailroading.instance, CarFreight::new, ImmersiveRailroading.ENTITY_SYNC_DISTANCE);
 				EntityRegistry.register(ImmersiveRailroading.instance, CarPassenger::new, ImmersiveRailroading.ENTITY_SYNC_DISTANCE);
 				EntityRegistry.register(ImmersiveRailroading.instance, CarTank::new, ImmersiveRailroading.ENTITY_SYNC_DISTANCE);
@@ -105,6 +108,8 @@ public class ImmersiveRailroading extends ModCore.Mod {
 				DamageTypes.register();
 
 				Command.register(new IRCommand());
+				Command.register(new TrainActionCommand("crack", false));
+				Command.register(new TrainActionCommand("explossuion", true));
 
 				break;
 			case INITIALIZE:

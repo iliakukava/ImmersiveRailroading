@@ -71,12 +71,15 @@ public final class ModelScript {
             return null;
         }
         Pose pose = session.poses.get(group);
-        if (pose == null || (!pose.hasRotation && !pose.hasTranslation)) {
+        if (pose == null || !pose.active()) {
             return null;
         }
         Matrix4 matrix = new Matrix4();
         if (pose.hasTranslation) {
             matrix = matrix.translate(pose.tx, pose.ty, pose.tz);
+        }
+        if (pose.hasPivot) {
+            matrix = matrix.translate(pose.px, pose.py, pose.pz);
         }
         if (pose.hasRotation) {
             if (pose.rx != 0) {
@@ -89,7 +92,45 @@ public final class ModelScript {
                 matrix = matrix.rotate(Math.toRadians(pose.rz), 0, 0, 1);
             }
         }
+        if (pose.hasScale) {
+            matrix = matrix.scale(pose.sx, pose.sy, pose.sz);
+        }
+        if (pose.hasPivot) {
+            matrix = matrix.translate(-pose.px, -pose.py, -pose.pz);
+        }
         return matrix;
+    }
+
+    public Boolean glow(EntityMoveableRollingStock stock, String group) {
+        Session session = clientSessions.get(stock.getUUID());
+        if (session == null) {
+            return null;
+        }
+        return session.glow.get(group);
+    }
+
+    public Float alpha(EntityMoveableRollingStock stock, String group) {
+        Session session = clientSessions.get(stock.getUUID());
+        if (session == null) {
+            return null;
+        }
+        return session.alpha.get(group);
+    }
+
+    public java.util.Set<String> gifGroups(EntityMoveableRollingStock stock) {
+        Session session = clientSessions.get(stock.getUUID());
+        if (session == null) {
+            return java.util.Set.of();
+        }
+        return session.gifs.keySet();
+    }
+
+    public String gifPath(EntityMoveableRollingStock stock, String group) {
+        Session session = clientSessions.get(stock.getUUID());
+        if (session == null) {
+            return null;
+        }
+        return session.gifs.get(group);
     }
 
     private void tick(EntityMoveableRollingStock stock, boolean server) {
@@ -257,8 +298,110 @@ public final class ModelScript {
             Session session = session(stock, server);
             if (arg(args, 0).isNil()) {
                 session.poses.clear();
+                session.glow.clear();
+                session.alpha.clear();
+                session.gifs.clear();
             } else {
-                session.poses.remove(arg(args, 0).asString());
+                String group = arg(args, 0).asString();
+                session.poses.remove(group);
+                session.glow.remove(group);
+                session.alpha.remove(group);
+                session.gifs.remove(group);
+            }
+            return List.of();
+        }));
+        api.set("scale_group", LuaValue.function((rt, args) -> {
+            scale(session(stock, server), arg(args, 0).asString(), arg(args, 1), arg(args, 2), arg(args, 3));
+            return List.of();
+        }));
+        api.set("pivot_group", LuaValue.function((rt, args) -> {
+            session(stock, server).pivot(arg(args, 0).asString(), arg(args, 1).asNumber(0), arg(args, 2).asNumber(0), arg(args, 3).asNumber(0));
+            return List.of();
+        }));
+        api.set("set_glow", LuaValue.function((rt, args) -> {
+            String group = arg(args, 0).asString();
+            Session session = session(stock, server);
+            if (arg(args, 1).isNil()) {
+                session.glow.remove(group);
+            } else {
+                session.glow.put(group, arg(args, 1).isTruthy());
+            }
+            return List.of();
+        }));
+        api.set("set_alpha", LuaValue.function((rt, args) -> {
+            String group = arg(args, 0).asString();
+            Session session = session(stock, server);
+            if (arg(args, 1).isNil()) {
+                session.alpha.remove(group);
+            } else {
+                double alpha = arg(args, 1).asNumber(0);
+                session.alpha.put(group, (float) Math.max(0, Math.min(1, alpha)));
+            }
+            return List.of();
+        }));
+        api.set("gif", LuaValue.function((rt, args) -> {
+            session(stock, server).gifs.put(arg(args, 0).asString(), arg(args, 1).asString());
+            return List.of();
+        }));
+        api.set("part", LuaValue.function((rt, args) -> List.of(partTable(stock, server, arg(args, 0).asString()))));
+        api.set("throttle", LuaValue.function((rt, args) -> List.of(LuaValue.number(readThrottle(stock)))));
+        api.set("set_throttle", LuaValue.function((rt, args) -> {
+            if (server) {
+                writeThrottle(stock, (float) arg(args, 0).asNumber(0));
+            }
+            return List.of();
+        }));
+        api.set("reverser", LuaValue.function((rt, args) -> List.of(LuaValue.number(readReverser(stock)))));
+        api.set("set_reverser", LuaValue.function((rt, args) -> {
+            if (server && stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco) {
+                loco.setReverser((float) arg(args, 0).asNumber(0));
+            }
+            return List.of();
+        }));
+        api.set("train_brake", LuaValue.function((rt, args) -> List.of(LuaValue.number(readTrainBrake(stock)))));
+        api.set("set_train_brake", LuaValue.function((rt, args) -> {
+            if (server && stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco) {
+                loco.setTrainBrake((float) arg(args, 0).asNumber(0));
+            }
+            return List.of();
+        }));
+        api.set("independent_brake", LuaValue.function((rt, args) -> List.of(LuaValue.number(stock.getIndependentBrake()))));
+        api.set("set_independent_brake", LuaValue.function((rt, args) -> {
+            if (server) {
+                stock.setIndependentBrake((float) arg(args, 0).asNumber(0));
+            }
+            return List.of();
+        }));
+        api.set("brake_pressure", LuaValue.function((rt, args) -> List.of(LuaValue.number(stock.getBrakePressure()))));
+        api.set("sliding", LuaValue.function((rt, args) -> List.of(LuaValue.bool(stock.sliding))));
+        api.set("derailed", LuaValue.function((rt, args) -> List.of(LuaValue.bool(stock.isDerailed()))));
+        api.set("derail", LuaValue.function((rt, args) -> {
+            if (server) {
+                stock.derailConsist();
+            }
+            return List.of();
+        }));
+        api.set("explode", LuaValue.function((rt, args) -> {
+            if (server) {
+                stock.explodeConsist();
+            }
+            return List.of();
+        }));
+        api.set("horn", LuaValue.function((rt, args) -> {
+            if (server && stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco) {
+                loco.setHorn((int) arg(args, 0).asNumber(10), 1f);
+            }
+            return List.of();
+        }));
+        api.set("bell", LuaValue.function((rt, args) -> {
+            if (server && stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco) {
+                loco.setBell((int) arg(args, 0).asNumber(20));
+            }
+            return List.of();
+        }));
+        api.set("emergency", LuaValue.function((rt, args) -> {
+            if (server && stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco) {
+                loco.setEmergency(arg(args, 0).isNil() || arg(args, 0).isTruthy());
             }
             return List.of();
         }));
@@ -299,6 +442,9 @@ public final class ModelScript {
         final Set<UUID> passengers = new HashSet<>();
         final Map<String, Boolean> visibility = new HashMap<>();
         final Map<String, Pose> poses = new HashMap<>();
+        final Map<String, Boolean> glow = new HashMap<>();
+        final Map<String, Float> alpha = new HashMap<>();
+        final Map<String, String> gifs = new HashMap<>();
 
         Pose rotation(String group, double x, double y, double z) {
             Pose pose = poses.computeIfAbsent(group, key -> new Pose());
@@ -317,6 +463,15 @@ public final class ModelScript {
             pose.hasTranslation = true;
             return pose;
         }
+
+        Pose pivot(String group, double x, double y, double z) {
+            Pose pose = poses.computeIfAbsent(group, key -> new Pose());
+            pose.px = x;
+            pose.py = y;
+            pose.pz = z;
+            pose.hasPivot = true;
+            return pose;
+        }
     }
 
     private static final class Pose {
@@ -326,7 +481,95 @@ public final class ModelScript {
         double tx;
         double ty;
         double tz;
+        double sx = 1;
+        double sy = 1;
+        double sz = 1;
+        double px;
+        double py;
+        double pz;
         boolean hasRotation;
         boolean hasTranslation;
+        boolean hasScale;
+        boolean hasPivot;
+
+        boolean active() {
+            return hasRotation || hasTranslation || hasScale || hasPivot;
+        }
+    }
+
+    private LuaValue partTable(EntityMoveableRollingStock stock, boolean server, String group) throws LuaException {
+        LuaValue table = LuaValue.table();
+        var api = table.table(0);
+        api.set("move", LuaValue.function((rt, args) -> {
+            session(stock, server).translation(group, arg(args, 0).asNumber(0), arg(args, 1).asNumber(0), arg(args, 2).asNumber(0));
+            return List.of();
+        }));
+        api.set("rotate", LuaValue.function((rt, args) -> {
+            session(stock, server).rotation(group, arg(args, 0).asNumber(0), arg(args, 1).asNumber(0), arg(args, 2).asNumber(0));
+            return List.of();
+        }));
+        api.set("scale", LuaValue.function((rt, args) -> {
+            scale(session(stock, server), group, arg(args, 0), arg(args, 1), arg(args, 2));
+            return List.of();
+        }));
+        api.set("pivot", LuaValue.function((rt, args) -> {
+            session(stock, server).pivot(group, arg(args, 0).asNumber(0), arg(args, 1).asNumber(0), arg(args, 2).asNumber(0));
+            return List.of();
+        }));
+        api.set("glow", LuaValue.function((rt, args) -> {
+            session(stock, server).glow.put(group, arg(args, 0).isNil() || arg(args, 0).isTruthy());
+            return List.of();
+        }));
+        api.set("alpha", LuaValue.function((rt, args) -> {
+            session(stock, server).alpha.put(group, (float) Math.max(0, Math.min(1, arg(args, 0).asNumber(1))));
+            return List.of();
+        }));
+        api.set("visible", LuaValue.function((rt, args) -> {
+            session(stock, server).visibility.put(group, arg(args, 0).isNil() || arg(args, 0).isTruthy());
+            return List.of();
+        }));
+        api.set("gif", LuaValue.function((rt, args) -> {
+            session(stock, server).gifs.put(group, arg(args, 0).asString());
+            return List.of();
+        }));
+        return table;
+    }
+
+    private static void scale(Session session, String group, LuaValue x, LuaValue y, LuaValue z) throws LuaException {
+        double sx = x.isNil() ? 1 : x.asNumber(0);
+        double sy = y.isNil() ? sx : y.asNumber(0);
+        double sz = z.isNil() ? sx : z.asNumber(0);
+        Pose pose = session.poses.computeIfAbsent(group, key -> new Pose());
+        pose.sx = sx;
+        pose.sy = sy;
+        pose.sz = sz;
+        pose.hasScale = true;
+    }
+
+    private static float readThrottle(EntityMoveableRollingStock stock) {
+        if (stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco) {
+            return loco.getThrottle();
+        }
+        return 0;
+    }
+
+    private static void writeThrottle(EntityMoveableRollingStock stock, float value) {
+        if (stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco) {
+            loco.setThrottle(value);
+        }
+    }
+
+    private static float readReverser(EntityMoveableRollingStock stock) {
+        if (stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco) {
+            return loco.getReverser();
+        }
+        return 0;
+    }
+
+    private static float readTrainBrake(EntityMoveableRollingStock stock) {
+        if (stock instanceof cam72cam.immersiverailroading.entity.Locomotive loco) {
+            return loco.getTrainBrake();
+        }
+        return 0;
     }
 }
